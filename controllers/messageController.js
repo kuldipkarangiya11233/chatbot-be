@@ -9,8 +9,9 @@ const Chat = require('../models/chatModel.js');
 const allMessages = asyncHandler(async (req, res) => {
   try {
     const messages = await Message.find({ chat: req.params.chatId })
-      .populate('sender', 'name email') // Populate sender's name and email
-      .populate('chat'); // Populate chat details (though often not needed if already in chat context)
+      .populate('sender', 'fullName email') // Populate sender's fullName and email
+      .populate('chat') // Populate chat details
+      .sort({ createdAt: 1 }); // Sort by creation time ascending
     res.json(messages);
   } catch (error) {
     res.status(400);
@@ -39,18 +40,19 @@ const sendMessage = asyncHandler(async (req, res) => {
     var message = await Message.create(newMessage);
 
     // Populate sender and chat details for the created message
-    message = await message.populate('sender', 'name'); // Populate sender's name
+    message = await message.populate('sender', 'fullName email'); // Populate sender's fullName
     message = await message.populate('chat');           // Populate chat details
     
     // Populate the users within the chat (to know who is in the chat)
     message = await User.populate(message, {
       path: 'chat.users',
-      select: 'name email', // Select specific fields for users in the chat
+      select: 'fullName email', // Select specific fields for users in the chat
     });
 
     // Update the latestMessage field in the Chat model
     await Chat.findByIdAndUpdate(req.body.chatId, {
       latestMessage: message,
+      lastMessageAt: new Date(), // Update the last message timestamp
     });
 
     res.json(message); // Send the fully populated message back
@@ -94,11 +96,10 @@ const editMessage = asyncHandler(async (req, res) => {
 
     // Populate details for the response
     const populatedMessage = await Message.findById(updatedMessage._id)
-        .populate('sender', 'name email')
+        .populate('sender', 'fullName email')
         .populate('chat');
 
     res.json(populatedMessage);
 });
-
 
 module.exports = { allMessages, sendMessage, editMessage };

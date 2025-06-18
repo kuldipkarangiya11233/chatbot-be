@@ -20,11 +20,13 @@ app.use(express.json()); // To parse JSON bodies
 const userRoutes = require('./routes/userRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const messageRoutes = require('./routes/messageRoutes');
+const aiChatRoutes = require('./routes/aiChatRoutes');
 
 // Mount Routes
 app.use('/api/users', userRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/message', messageRoutes);
+app.use('/api/ai-chat', aiChatRoutes);
 
 
 // Basic route
@@ -52,6 +54,9 @@ const io = require('socket.io')(server, {
   }
 });
 
+// Make io available to controllers
+app.set('io', io);
+
 io.on("connection", (socket) => {
   console.log("A user connected to Socket.IO:", socket.id);
 
@@ -72,37 +77,39 @@ io.on("connection", (socket) => {
   socket.on('typing', (room) => socket.in(room).emit('typing', room)); // Emit to others in room
   socket.on('stop typing', (room) => socket.in(room).emit('stop typing', room));
 
-
   // Handle new message
   socket.on('new message', (newMessageReceived) => {
-    var chat = newMessageReceived.chat;
+    console.log('New message received via socket:', newMessageReceived);
+    
+    // Get the chat ID from the message
+    const chatId = newMessageReceived.chat;
+    
+    if (!chatId) {
+      console.log('Chat ID not found in message:', newMessageReceived);
+      return;
+    }
 
-    if (!chat.users) return console.log('Chat.users not defined for message:', newMessageReceived);
-
-    // Emit to all users in the chat room, including the sender
-    chat.users.forEach(user => {
-      // Emit to the specific user's room (if they are connected)
-      // The client-side logic will handle displaying the message appropriately.
-      io.to(user._id).emit('message received', newMessageReceived);
-    });
+    // Emit to all users in the chat room
+    socket.to(chatId).emit('message received', newMessageReceived);
+    console.log('Message emitted to chat room:', chatId);
   });
   
   // Handle message edit
   socket.on('edit message', (editedMessage) => {
-    var chat = editedMessage.chat;
-    if (!chat || !chat.users) return console.log('Chat or Chat.users not defined for edited message:', editedMessage);
+    console.log('Message edit received via socket:', editedMessage);
+    
+    const chatId = editedMessage.chat;
+    if (!chatId) {
+      console.log('Chat ID not found in edited message:', editedMessage);
+      return;
+    }
 
-    chat.users.forEach(user => {
-        // Emit to all users in the chat including sender to update their UI
-        socket.to(user._id).emit('message edited', editedMessage);
-    });
+    // Emit to all users in the chat room except sender
+    socket.to(chatId).emit('message edited', editedMessage);
+    console.log('Message edit emitted to chat room:', chatId);
   });
-
 
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
-    // TODO: Handle cleanup if user leaves rooms, etc.
-    // For example, if we stored which room user was in:
-    // socket.leave(userData._id); // This would need userData to be available here
   });
 });

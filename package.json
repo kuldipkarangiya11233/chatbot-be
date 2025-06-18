@@ -1,11 +1,11 @@
 {
-  "name": "chatwithfamily-backend",
+  "name": "healthcare-chatbot-backend",
   "version": "1.0.0",
-  "description": "Backend for ChatWithFamily application",
+  "description": "Healthcare chatbot backend with OpenAI integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "server": "nodemon server.js"
+    "dev": "nodemon server.js"
   },
   "keywords": [
     "chat",
@@ -21,10 +21,11 @@
     "express": "^4.18.2",
     "express-async-handler": "^1.2.0",
     "jsonwebtoken": "^9.0.0",
-    "mongoose": "^7.0.0",
+    "mongoose": "^7.0.3",
+    "openai": "^4.0.0",
     "socket.io": "^4.6.1"
   },
   "devDependencies": {
-    "nodemon": "^2.0.20"
+    "nodemon": "^2.0.22"
   }
 }

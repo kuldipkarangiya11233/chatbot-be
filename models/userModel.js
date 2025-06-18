@@ -3,9 +3,11 @@ const bcrypt = require('bcryptjs');
 
 const userSchema = mongoose.Schema(
   {
-    name: {
+    fullName: {
       type: String,
-      required: false, // Not required at registration, but for profile completion
+      required: function () {
+        return this.isProfileComplete === true;
+      },
     },
     email: {
       type: String,
@@ -18,41 +20,80 @@ const userSchema = mongoose.Schema(
     },
     mobileNumber: {
       type: String,
-      required: false, // For profile completion
+      required: function () {
+        return this.isProfileComplete === true;
+      },
     },
-    stage: {
+    role: {
       type: String,
-      required: false, // For profile completion
-      enum: ['normal', 'critical', 'stage3', 'stage4', 'stage5'], // Example stages, can be expanded
+      enum: ['patient', 'family_member'],
+      required: true,
+      default: 'patient', // Default role is patient
+    },
+    relation: {
+      type: String,
+      required: function () {
+        return this.role === 'family_member';
+      }
+    },
+    healthStage: {
+      type: String,
+      enum: ['critical', 'serious', 'stable', 'normal', 'good', 'excellent'],
+      required: function () {
+        return this.role === 'patient' && this.isProfileComplete === true;
+      }
     },
     isProfileComplete: {
       type: Boolean,
       default: false,
     },
-    familyMembers: [
-      {
+    // For family members, this will store the associated patient's ID
+    associatedPatient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: function () {
+        return this.role === 'family_member';
+      }
+    },
+    // For patients, this will store their family members' IDs
+    familyMembers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
+    // Store assigned tasks for family members
+    assignedTasks: [{
+      assignedTo: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        ref: 'User'
       },
-    ],
-    // To track who added this user, if applicable
-    addedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: false,
-    }
+      task: String,
+      status: {
+        type: String,
+        enum: ['pending', 'in_progress', 'completed'],
+        default: 'pending'
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now
+      }
+    }],
+    // Store the default family chat ID
+    familyChatId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Chat',
+    },
   },
   {
-    timestamps: true, // Adds createdAt and updatedAt timestamps
+    timestamps: true,
   }
 );
 
-// Method to match user entered password to hashed password in database
+// Match user entered password to hashed password in database
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Middleware to hash password before saving user
+// Encrypt password before saving
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     next();
@@ -62,5 +103,4 @@ userSchema.pre('save', async function (next) {
 });
 
 const User = mongoose.model('User', userSchema);
-
 module.exports = User;

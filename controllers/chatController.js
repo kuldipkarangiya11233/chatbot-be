@@ -1,6 +1,12 @@
 const asyncHandler = require('express-async-handler');
-const Chat = require('../models/chatModel.js');
-const User = require('../models/userModel.js');
+const Chat = require('../models/chatModel');
+const User = require('../models/userModel');
+const OpenAI = require('openai');
+
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // @desc    Fetch all chats for a user
 // @route   GET /api/chat
@@ -88,6 +94,236 @@ const accessChat = asyncHandler(async (req, res) => {
   }
 });
 
+// Get all chats for a patient and their family members
+const getChats = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    let query = {};
+    if (user.role === 'patient') {
+      query.patient = user._id;
+    } else if (user.role === 'family_member') {
+      query.patient = user.associatedPatient;
+    }
+
+    const chat = await Chat.findOne(query)
+      .sort({ lastMessageAt: -1 })
+      .populate('patient', 'fullName email')
+      .populate('messages.sender', 'fullName email');
+
+    if (!chat) {
+      return res.status(404).json({ message: 'Family chat not found' });
+    }
+
+    res.json(chat);
+  } catch (error) {
+    console.error('Error in getChats:', error);
+    res.status(500).json({ message: 'Error fetching chat', error: error.message });
+  }
+};
+
+// Create a new chat
+const createChat = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const patientId = user.role === 'patient' ? user._id : user.associatedPatient;
+    if (!patientId) {
+      return res.status(400).json({ message: 'Invalid user role or missing patient association' });
+    }
+
+    const newChat = new Chat({
+      patient: patientId,
+      title: 'New Conversation',
+    });
+
+    const savedChat = await newChat.save();
+    res.status(201).json(savedChat);
+  } catch (error) {
+    console.error('Error in createChat:', error);
+    res.status(500).json({ message: 'Error creating chat', error: error.message });
+  }
+};
+
+// Send message to family chat
+const sendFamilyMessage = async (req, res) => {
+  try {
+    const { content, chatId } = req.body;
+    
+    if (!content || !chatId) {
+      return res.status(400).json({ message: 'Content and chatId are required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Verify chat belongs to patient or their family member
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    // Check if user has access to this chat
+    const patientId = user.role === 'patient' ? user._id : user.associatedPatient;
+    if (chat.patient.toString() !== patientId.toString()) {
+      return res.status(403).json({ message: 'Access denied to this chat' });
+    }
+
+    // Add message to chat
+    const newMessage = {
+      sender: user._id,
+      content: content,
+      isAI: false,
+    };
+
+    chat.messages.push(newMessage);
+    chat.lastMessageAt = new Date();
+    
+    await chat.save();
+
+    // Populate the sender information for the response
+    const populatedChat = await Chat.findById(chatId)
+      .populate('messages.sender', 'fullName email')
+      .populate('patient', 'fullName email');
+
+    // Get the last message (the one we just added)
+    const lastMessage = populatedChat.messages[populatedChat.messages.length - 1];
+
+    res.json(lastMessage);
+  } catch (error) {
+    console.error('Error in sendFamilyMessage:', error);
+    res.status(500).json({ message: 'Error sending message', error: error.message });
+  }
+};
+
+// Get messages for a specific chat
+const getChatMessages = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const chat = await Chat.findById(chatId)
+      .populate('messages.sender', 'fullName email')
+      .populate('patient', 'fullName email');
+
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    // Check if user has access to this chat
+    const patientId = user.role === 'patient' ? user._id : user.associatedPatient;
+    if (chat.patient._id.toString() !== patientId.toString()) {
+      return res.status(403).json({ message: 'Access denied to this chat' });
+    }
+
+    res.json(chat.messages);
+  } catch (error) {
+    console.error('Error in getChatMessages:', error);
+    res.status(500).json({ message: 'Error fetching messages', error: error.message });
+  }
+};
+
+// Edit a message in family chat
+const editFamilyMessage = async (req, res) => {
+  try {
+    const { chatId, messageId } = req.params;
+    const { content } = req.body;
+    
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: 'Content cannot be empty' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    // Check if user has access to this chat
+    const patientId = user.role === 'patient' ? user._id : user.associatedPatient;
+    if (chat.patient.toString() !== patientId.toString()) {
+      return res.status(403).json({ message: 'Access denied to this chat' });
+    }
+
+    // Find the message to edit
+    const messageIndex = chat.messages.findIndex(msg => msg._id.toString() === messageId);
+    if (messageIndex === -1) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    const message = chat.messages[messageIndex];
+    
+    // Check if the user is the sender of the message
+    if (message.sender.toString() !== user._id.toString()) {
+      return res.status(403).json({ message: 'You can only edit your own messages' });
+    }
+
+    // Update the message
+    chat.messages[messageIndex].content = content.trim();
+    chat.messages[messageIndex].isEdited = true;
+    chat.messages[messageIndex].updatedAt = new Date();
+    
+    await chat.save();
+
+    // Populate the sender information for the response
+    const populatedChat = await Chat.findById(chatId)
+      .populate('messages.sender', 'fullName email')
+      .populate('patient', 'fullName email');
+
+    const editedMessage = populatedChat.messages[messageIndex];
+
+    res.json(editedMessage);
+  } catch (error) {
+    console.error('Error in editFamilyMessage:', error);
+    res.status(500).json({ message: 'Error editing message', error: error.message });
+  }
+};
+
+// Delete a chat
+const deleteChat = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const patientId = user.role === 'patient' ? user._id : user.associatedPatient;
+    if (!patientId) {
+      return res.status(400).json({ message: 'Invalid user role or missing patient association' });
+    }
+
+    const chat = await Chat.findOneAndDelete({
+      _id: chatId,
+      patient: patientId,
+    });
+
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    res.json({ message: 'Chat deleted successfully' });
+  } catch (error) {
+    console.error('Error in deleteChat:', error);
+    res.status(500).json({ message: 'Error deleting chat', error: error.message });
+  }
+};
 
 // Note: createGroupChat, renameGroupChat, addToGroup, removeFromGroup
 // are more explicitly handled by user registration, addFamilyMember, and future removeFamilyMember logic
@@ -97,6 +333,12 @@ const accessChat = asyncHandler(async (req, res) => {
 module.exports = {
   fetchUserChats,
   accessChat,
+  getChats,
+  createChat,
+  sendFamilyMessage,
+  getChatMessages,
+  deleteChat,
+  editFamilyMessage,
   // createGroupChat, (Handled in userController for family chat)
   // renameGroupChat,
   // addToGroup, (Handled in userController for family chat)
