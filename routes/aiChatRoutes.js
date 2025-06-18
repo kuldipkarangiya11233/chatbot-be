@@ -7,6 +7,7 @@ const {
   getAIChatMessages,
   sendAIMessage,
   deleteAIChat,
+  updateChatTitle,
 } = require('../controllers/aiChatController');
 
 // All routes are protected and require authentication
@@ -23,6 +24,9 @@ router.get('/:chatId/messages', getAIChatMessages);
 
 // Send message to AI
 router.post('/:chatId/message', sendAIMessage);
+
+// Update chat title
+router.put('/:chatId/title', updateChatTitle);
 
 // Delete an AI chat
 router.delete('/:chatId', deleteAIChat);

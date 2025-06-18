@@ -142,7 +142,7 @@ const getAIChatMessages = asyncHandler(async (req, res) => {
 const sendAIMessage = asyncHandler(async (req, res) => {
   try {
     const { chatId } = req.params;
-    const { content } = req.body;
+    const { content, senderName } = req.body;
     
     if (!content || !content.trim()) {
       return res.status(400).json({ message: 'Message content is required' });
@@ -183,11 +183,12 @@ const sendAIMessage = asyncHandler(async (req, res) => {
     //   return res.status(403).json({ message: 'Access denied to this chat' });
     // }
 
-    // Add user message
+    // Add user message with sender name
     const userMessage = {
       sender: user._id,
       content: content.trim(),
       isAI: false,
+      senderName: senderName || user.fullName,
     };
 
     chat.messages.push(userMessage);
@@ -205,7 +206,7 @@ const sendAIMessage = asyncHandler(async (req, res) => {
 Family Context:
 - Patient: ${patientName}
 - Family Members: ${familyNames || 'None'}
-- Current User: ${user.fullName} (${user.role})
+- Current User: ${senderName || user.fullName} (${user.role})
 
 Provide clear, accurate, and empathetic responses to health-related questions. Consider the family context when giving advice. Be supportive and informative while maintaining medical accuracy.`;
 
@@ -322,10 +323,48 @@ const deleteAIChat = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Update AI chat title
+// @route   PUT /api/ai-chat/:chatId/title
+// @access  Private
+const updateChatTitle = asyncHandler(async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { title } = req.body;
+    
+    if (!title || !title.trim()) {
+      return res.status(400).json({ message: 'Chat title is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const chat = await Chat.findById(chatId)
+      .populate('createdBy', 'fullName email')
+      .populate('messages.sender', 'fullName email')
+      .populate('familyContext.patientId', 'fullName email')
+      .populate('familyContext.familyMembers', 'fullName email');
+
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    chat.title = title.trim();
+    await chat.save();
+
+    res.json(chat);
+  } catch (error) {
+    console.error('Error in updateChatTitle:', error);
+    res.status(500).json({ message: 'Error updating chat title', error: error.message });
+  }
+});
+
 module.exports = {
   getAIChats,
   createAIChat,
   getAIChatMessages,
   sendAIMessage,
   deleteAIChat,
+  updateChatTitle,
 }; 
