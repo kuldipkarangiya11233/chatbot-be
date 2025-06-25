@@ -2,6 +2,8 @@ const asyncHandler = require('express-async-handler');
 const Chat = require('../models/chatModel');
 const User = require('../models/userModel');
 const OpenAI = require('openai');
+const axios = require('axios');
+const pdfParse = require('pdf-parse');
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -192,6 +194,48 @@ const sendAIMessage = asyncHandler(async (req, res) => {
     };
 
     chat.messages.push(userMessage);
+
+    // --- PDF Answer Logic ---
+    let pdfAnswer = null;
+    try {
+      const pdfUrl = process.env.PDF_URL;
+      if (pdfUrl) {
+        const response = await axios.get(pdfUrl, { responseType: 'arraybuffer' });
+        const data = await pdfParse(response.data);
+        const pdfText = data.text;
+        // Simple keyword search: find a sentence containing the question's main keyword
+        // (For demo, use the first 3 words of the question as a keyword)
+        const keywords = content.trim().split(/\s+/).slice(0, 3).join(' ');
+        const regex = new RegExp(`[^.?!]*${keywords}[^.?!]*[.?!]`, 'i');
+        const match = pdfText.match(regex);
+        if (match) {
+          pdfAnswer = `According to the provided document: ${match[0].trim()}`;
+        }
+      }
+    } catch (pdfErr) {
+      console.error('PDF parse error:', pdfErr.message);
+    }
+
+    if (pdfAnswer) {
+      // Add AI response from PDF
+      const aiMessage = {
+        sender: user._id,
+        content: pdfAnswer,
+        isAI: true,
+      };
+      chat.messages.push(aiMessage);
+      chat.lastMessageAt = new Date();
+      await chat.save();
+      const populatedChat = await Chat.findById(chatId)
+        .populate('messages.sender', 'fullName email')
+        .populate('createdBy', 'fullName email');
+      const latestMessages = populatedChat.messages.slice(-2);
+      return res.json({
+        chat: populatedChat,
+        newMessages: latestMessages,
+      });
+    }
+    // --- End PDF logic, fallback to LLM below ---
 
     // Generate AI response
     try {
